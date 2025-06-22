@@ -13,6 +13,11 @@
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
+
+/PerfUnit.Test/
+/PerfUnit.TestCalculator/
+/PerfUnit.BenchmarkingTestGrounds/
+
 # Mono auto generated files
 mono_crash.*
 
