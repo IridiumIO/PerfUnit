@@ -9,64 +9,48 @@ using System.Threading.Tasks;
 
 public static class SimpleBenchmarker
 {
+
+    private static readonly int discardCount = 1;
+    private static readonly double desiredZ = 1.96;
+    private static readonly double desiredRelativeMargin = 0.005; 
+
+    private static readonly Stopwatch stopwatch = new Stopwatch();
+
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static void TrulyEmpty() { GC.KeepAlive(EmptyAction); }
     static readonly Action EmptyAction = TrulyEmpty;
 
-    static readonly int discardCount = 1;
-    static readonly double desiredZ = 1.96; // 95% confidence
-    static readonly double desiredRelativeMargin = 0.005; // 0.5% margin
+    public static Action<string> Output { get; set; } = Console.WriteLine;
 
-    static readonly Stopwatch stopwatch = new Stopwatch();
+    private record PhaseResult(double AvgNsPerOp, int[] OpsPerRound, double[] NsPerOpRounds, double AverageBytes);
 
-    private static (double avgNsPerOp, int[] opsPerRound, double[] nsPerOpRounds, double averageBytes) RunPhase(string phaseName,
-        Action action, int invocations, int minIterations = 15, int maxIterations = 50, bool leanMode = false)
+    private static PhaseResult RunPhase(string phaseName, Action action, int invocations, int minIterations, int maxIterations)
     {
 
-        if (leanMode)
-        {
-            for (int iteration = 0; iteration < maxIterations; iteration++)
-            {
-                for (int i = 0; i < invocations; i++) action();
-            }
-            return (0, Array.Empty<int>(), Array.Empty<double>(), 0);
-        }
 
         maxIterations += discardCount;
         var nsPerOp = new List<double>(maxIterations);
         var opsPerIteration = new List<int>(maxIterations);
-
         var allocatedBytesPerOp = new List<long>(maxIterations);
 
-        var requiredIterations = int.MaxValue;
+        var requiredIterations = maxIterations;
+        var runIterations = 0;
 
         for (int iteration = 0; iteration < maxIterations; iteration++)
         {
+            runIterations++;
             Task.Delay(10).Wait();
 
-            // Record GC collection counts before
-            int[] gcCollectionsBefore = new int[GC.MaxGeneration + 1];
-            for (int gen = 0; gen <= GC.MaxGeneration; gen++)
-                gcCollectionsBefore[gen] = GC.CollectionCount(gen);
-
-            // Record memory before
             long beforeAlloc = GC.GetAllocatedBytesForCurrentThread();
+
             stopwatch.Restart();
-
             for (int i = 0; i < invocations; i++) action();
-
             stopwatch.Stop();
 
-            // Record GC collection counts after
-            int[] gcCollectionsAfter = new int[GC.MaxGeneration + 1];
-            for (int gen = 0; gen <= GC.MaxGeneration; gen++)
-                gcCollectionsAfter[gen] = GC.CollectionCount(gen);
-
-            // Record memory after
             long afterAlloc = GC.GetAllocatedBytesForCurrentThread();
 
-            long allocDiff = afterAlloc - beforeAlloc;
-            allocatedBytesPerOp.Add(allocDiff / invocations);
+            allocatedBytesPerOp.Add((afterAlloc - beforeAlloc) / invocations);
 
             double ns = (stopwatch.ElapsedTicks * 1_000_000_000.0) / (Stopwatch.Frequency * invocations);
             nsPerOp.Add(ns);
@@ -74,45 +58,32 @@ public static class SimpleBenchmarker
 
             GC.Collect();
 
-
             if (nsPerOp.Count > discardCount + 4)
             {
-                // Use only the non-discarded results for statistics
-                var valid = nsPerOp.Skip(discardCount).ToArray();
-                var filtered = valid.FilterIQR();
+                var filtered = nsPerOp.Skip(discardCount).FilterIQR();
                 var (mean, stddev, margin) = GetStatistical(filtered, desiredZ);
 
-                // Calculate required rounds for current stddev/mean
                 requiredIterations = (int)Math.Ceiling(Math.Pow(desiredZ * stddev / (desiredRelativeMargin * mean), 2));
-
-                // Stop if we have enough rounds and the margin is satisfied
                 if (filtered.Length >= Math.Max(requiredIterations, minIterations) && margin / mean < desiredRelativeMargin)
-                {
                     break;
-                }
             }
- 
         }
 
-        // Use only the non-discarded results for final statistics
         double[] used = nsPerOp.Skip(discardCount).FilterIQR();
         double avg = used.Median();
-
-        // Memory: discard warmup, filter outliers, then average
         double[] usedAlloc = allocatedBytesPerOp.Skip(discardCount).Select(x => (double)x).FilterIQR();
         long avgAllocatedBytes = usedAlloc.Length > 0 ? (long)usedAlloc.Average() : 0;
 
-        Console.Write($"| Avg: {FormatTime(avg),2}/op    Memory: {FormatMemory(avgAllocatedBytes),1}");
-
+        // Output phase summary
+        var output = $"| Rounds: {runIterations,3} | Ops/Round: {invocations,9} | Avg: {FormatTime(avg),10}/op | Memory: {FormatMemory(avgAllocatedBytes),9}";
         if (used.Length > 1)
         {
             var (_, _, margin) = GetStatistical(used, desiredZ);
-            Console.Write($"  CI: +/-{FormatTime(margin),2:F4}");
+            output += $" | CI: +/-{FormatTime(margin),8}";
         }
-        Console.WriteLine();
+        Output(output);
 
-        // Also skip the opsPerRound for the discarded rounds
-        return (avg, opsPerIteration.Skip(discardCount).ToArray(), used, avgAllocatedBytes);
+        return new PhaseResult(avg, opsPerIteration.Skip(discardCount).ToArray(), used, avgAllocatedBytes);
     }
 
 
@@ -122,7 +93,6 @@ public static class SimpleBenchmarker
         double mean = data.Average();
         double stddev = Math.Sqrt(data.Sum(x => (x - mean) * (x - mean)) / (data.Length - 1));
         double margin = desiredZ * stddev / Math.Sqrt(data.Length);
-
         return (mean, stddev, margin);
     }
 
@@ -132,13 +102,10 @@ public static class SimpleBenchmarker
         while (true)
         {
             var sw = Stopwatch.StartNew();
-
             for (int i = 0; i < iterations; i++) action();
-
             sw.Stop();
 
             if (sw.ElapsedMilliseconds >= minTotalMilliseconds) break;
-
             iterations = Math.Min(iterations * 2, 536_870_912);
             if (iterations == 536_870_912) break;
 
@@ -149,7 +116,8 @@ public static class SimpleBenchmarker
 
     public static (double, double) Run(
         Action action,
-        int minTotalMilliseconds = 500,
+        int minTotalMilliseconds = 100,
+
         int minInvocations = 4,
 
         int minWarmupCount = 10,
@@ -161,7 +129,11 @@ public static class SimpleBenchmarker
         int iterationCount = 0,
 
         int jitWarmupInvocations = 10,
-        int jitWarmupCount = 3)
+        int jitWarmupCount = 3,
+
+        double expectedMaxTimeMs = 0,
+        double expectedMaxMemoryBytes = 0
+        )
     {
         Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.RealTime;
         Thread.CurrentThread.Priority = ThreadPriority.Highest;
@@ -178,7 +150,7 @@ public static class SimpleBenchmarker
             maxIterationCount = iterationCount;
         }
 
-        if (minTotalMilliseconds < 100)
+        if (minTotalMilliseconds < 50)
             throw new ArgumentException("minTotalMilliseconds must be at least 100 milliseconds");
         if (minInvocations < 1)
             throw new ArgumentException("minInvocations must be at least 1");
@@ -198,34 +170,85 @@ public static class SimpleBenchmarker
             throw new ArgumentNullException(nameof(action), "Action cannot be null");
 
 
-        Console.WriteLine("Jit Overhead");
+        Output("Jit Overhead");
         RunPhase("JIT Overhead", EmptyAction, jitWarmupInvocations, jitWarmupCount, jitWarmupCount);
 
 
-        Console.WriteLine("Jit Runner");
-        RunPhase("JIT Runner", action, jitWarmupInvocations, jitWarmupCount, jitWarmupCount);
+        Output("Jit Runner");
+        var jitResult = RunPhase("JIT Runner", action, jitWarmupInvocations, jitWarmupCount, jitWarmupCount);
+        if (TryShortCircuit(jitResult, expectedMaxTimeMs, expectedMaxMemoryBytes)) return (jitResult.AvgNsPerOp, jitResult.AverageBytes);
+
 
         int invocations = Math.Max(minInvocations, EstimateInvocations(action, minTotalMilliseconds));
 
-        Console.WriteLine("Warmup Overhead");
+
+        Output("Warmup Overhead");
         RunPhase("Warmup Overhead", EmptyAction, invocations, minWarmupCount, maxWarmupCount);
 
-        Console.WriteLine("Actual Overhead");
+
+        Output("Actual Overhead");
         var (avgOverheadNsPerOp, _, _, _) = RunPhase("Actual Overhead", EmptyAction, invocations, minIterationCount, maxIterationCount);
 
-        Console.WriteLine("Warmup Runner");
-        RunPhase("Warmup Runner", action, invocations, minWarmupCount, maxWarmupCount);
 
-        Console.WriteLine("Actual Runner");
+        Output("Warmup Runner");
+        var warmupResult = RunPhase("Warmup Runner", action, invocations, minWarmupCount, maxWarmupCount);
+        if (TryShortCircuit(warmupResult, expectedMaxTimeMs, expectedMaxMemoryBytes)) return (warmupResult.AvgNsPerOp, warmupResult.AverageBytes);
+
+
+        Output("Actual Runner");
         var (avgActualNsPerOp, opsPerRound, nsPerOpRounds, bytesUsed) = RunPhase("Actual Runner", action, invocations, minIterationCount, maxIterationCount);
+
 
         double avgNetNsPerOp = Math.Max(0, nsPerOpRounds.Select(ns => ns - avgOverheadNsPerOp).Median());
 
-        Console.WriteLine($"Final Result     Time:{FormatTime(avgNetNsPerOp)}   Ops:{opsPerRound.Sum(x => (long)x),9}    Memory:{bytesUsed,10}b");
-        Console.WriteLine(new string('=', 72));
-        Console.WriteLine();
+        Output("");
+        Output($"Final Result     Time:{FormatTime(avgNetNsPerOp)}   Ops:{opsPerRound.Sum(x => (long)x),9}    Memory:{bytesUsed,10}b");
+        Output(new string('=', 96));
+        Output("");
 
         return (avgNetNsPerOp, bytesUsed);
+    }
+
+
+    private static bool TryShortCircuit(
+        PhaseResult result,
+        double expectedMaxTimeMs,
+        double expectedMaxMemoryBytes)
+    {
+
+        var expectedMaxTimeNs = expectedMaxTimeMs * 1_000_000; // Convert ms to ns
+
+        // Both thresholds specified: require both to be satisfied
+        if (expectedMaxTimeNs > 0 && expectedMaxMemoryBytes > 0)
+        {
+            if (result.AvgNsPerOp < expectedMaxTimeNs && result.AverageBytes < expectedMaxMemoryBytes)
+            {
+                Output($"| Avg Time: {FormatTime(result.AvgNsPerOp)}   Memory: {FormatMemory(result.AverageBytes)}");
+                Output("Skipping further measurements as both time and memory usage are acceptable.");
+                return true;
+            }
+        }
+        // Only time threshold specified
+        else if (expectedMaxTimeNs > 0 && expectedMaxMemoryBytes == 0)
+        {
+            if (result.AvgNsPerOp < expectedMaxTimeNs)
+            {
+                Output($"| Avg Time: {FormatTime(result.AvgNsPerOp)}   Memory: {FormatMemory(result.AverageBytes)}");
+                Output("Skipping further measurements as time is acceptable.");
+                return true;
+            }
+        }
+        // Only memory threshold specified
+        else if (expectedMaxMemoryBytes > 0 && expectedMaxTimeNs == 0)
+        {
+            if (result.AverageBytes < expectedMaxMemoryBytes)
+            {
+                Output($"| Avg Time: {FormatTime(result.AvgNsPerOp)}   Memory: {FormatMemory(result.AverageBytes)}");
+                Output("Skipping further measurements as memory usage is acceptable.");
+                return true;
+            }
+        }
+        return false;
     }
 
 
@@ -241,7 +264,7 @@ public static class SimpleBenchmarker
         };
     }
 
-    private static string FormatMemory(long bytes)
+    private static string FormatMemory(double bytes)
     {
         return bytes switch
         {

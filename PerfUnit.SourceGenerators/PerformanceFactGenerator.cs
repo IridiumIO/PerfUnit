@@ -27,7 +27,8 @@ public class PerformanceFactGenerator : IIncrementalGenerator
         {
 
             // Group methods by (namespace, className)
-            var classGroups = new Dictionary<(string Namespace, string ClassName), List<MethodDeclarationSyntax>>();
+            var classGroups = new Dictionary<(string Namespace, string ClassName), List<(MethodDeclarationSyntax, SemanticModel)>>();
+
 
             foreach (var (method, semanticModel) in methodTuples)
             {
@@ -40,10 +41,10 @@ public class PerformanceFactGenerator : IIncrementalGenerator
 
                 if (!classGroups.TryGetValue(key, out var list))
                 {
-                    list = new List<MethodDeclarationSyntax>();
+                    list = new List<(MethodDeclarationSyntax, SemanticModel)>();
                     classGroups[key] = list;
                 }
-                list.Add(method);
+                list.Add((method, semanticModel));
             }
 
 
@@ -57,8 +58,21 @@ public class PerformanceFactGenerator : IIncrementalGenerator
                 var methodsBuilder = new StringBuilder();
 
 
-                foreach (var (method, semanticModel) in methodTuples)
+                HashSet<string> usings = ["using System;", "using Xunit;", "using PerfUnit;", "using PerfUnit.SharedStandard;"];
+
+                foreach (var (method, semanticModel) in methodList)
                 {
+
+                    var root = method.SyntaxTree.GetRoot();
+                    var usingDirectives = root.DescendantNodes()
+                        .OfType<UsingDirectiveSyntax>();
+                    foreach (var usingDirective in usingDirectives)
+                    {
+                        usings.Add(usingDirective.ToFullString().Trim());
+                    }
+
+
+
                     int actCount = 0;
                     var methodName = method.Identifier.Text;
 
@@ -72,6 +86,7 @@ public class PerformanceFactGenerator : IIncrementalGenerator
                             actCount++;
                     }
 
+
                     if (actCount > 1)
                     {
                         // Report a warning diagnostic at the method location
@@ -84,24 +99,70 @@ public class PerformanceFactGenerator : IIncrementalGenerator
                         continue;
                     }
 
+                    //Get other attributes
+                    var attributeLines = new StringBuilder();
+                    foreach (var attrList in method.AttributeLists)
+                    {
+                        foreach (var attr in attrList.Attributes)
+                        {
+                            var attrName = attr.Name.ToString();
+                            if (!attrName.Contains("Fact") && !attrName.Contains("PerfSpeed") && !attrName.Contains("PerfMemory")) // filter out if needed
+                            {
+                                attributeLines.AppendLine($"[{attr}]");
+                            }
+                        }
+                    }
+
                     var methodBody = new StringBuilder();
 
                     string expressionline = String.Empty;
 
                     foreach (var statement in bodyStatements)
                     {
-                        var line = statement.ToFullString();
-                        if (line.Contains(".Perf()"))
-                        {
-                            expressionline = line.Replace(".Perf()", "").TrimEnd();
 
-                            methodBody.Append(expressionline);
+                        // Find all invocation expressions in the statement
+                        var invocations = statement.DescendantNodesAndSelf()
+                            .OfType<InvocationExpressionSyntax>();
+
+                        foreach (var invocation in invocations)
+                        {
+                            
+
+
+                            if (invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
+                                 memberAccess.Name.Identifier.Text == "Perf")
+                            {
+                                // Find the outermost invocation/member access containing this .Perf() call
+                                SyntaxNode outer = invocation;
+                                while ( outer.Parent is InvocationExpressionSyntax || outer.Parent is MemberAccessExpressionSyntax)
+                                {
+                                    outer = outer.Parent;
+                                }
+
+                                // Remove .Perf() from the outermost expression
+                                var cleanedExpr = RemovePerfFromChain((ExpressionSyntax)outer);
+
+                                // Use semantic model to get the symbol and return type for the cleaned, outermost invocation
+                                var symbolInfo = semanticModel.GetSymbolInfo(outer);
+                                var methodSymbol = symbolInfo.Symbol as IMethodSymbol;
+                                ITypeSymbol returnType = methodSymbol?.ReturnType;
+
+                                if (returnType != null && returnType.SpecialType == SpecialType.System_Void)
+                                {
+                                    expressionline = cleanedExpr;
+                                }
+                                else
+                                {
+                                    expressionline = "var _dis_ = " + cleanedExpr;
+                                }
+                                break;
+                            }
+
 
                         }
-                        else
-                        {
-                            methodBody.AppendLine(line.TrimEnd());
-                        }
+
+                        methodBody.Append(statement.ToFullString().Replace(".Perf()", ""));
+
                     }
 
                     var timeAndComparer = GetExpectedNanoSecondsAndComparer(method, semanticModel);
@@ -132,36 +193,44 @@ public class PerformanceFactGenerator : IIncrementalGenerator
                     }
 
                     methodsBuilder.AppendLine($$"""
-                                                    [Fact(DisplayName = "{{methodName}}")]
-                                                    public void {{methodName}}_g() {
-                                                        {{methodBody}}
+                                                        {{attributeLines}}
+                                                        [Fact(DisplayName = "{{methodName}}")]
+                                                        public void {{methodName}}_g() {
+                                                            {{methodBody}}
 
-                                                        var (benchTime, memory) = SimpleBenchmarker.Run(() =>
-                                                        {
-                                                            {{expressionline}}
-                                                        }
-                                                        );
+                                                            var (benchTime, memory) = SimpleBenchmarker.Run(() =>
+                                                            {
+                                                                {{expressionline}};
+                                                            }, 
+                                                            expectedMaxMemoryBytes:{{(memoryAndComparer.HasValue ? memoryAndComparer.Value.Item1 : 0)}}, 
+                                                            expectedMaxTimeMs: {{(timeAndComparer.HasValue ? timeAndComparer.Value.Item1 / 1_000_000.0 : 0)}}
+                                                            );
                                                         
-                                                        {{timeAndComparerInlineTest}}
-                                                        {{memoryAndComparerInlineTest}}
-                                                    }
+                                                            {{timeAndComparerInlineTest}}
+                                                            {{memoryAndComparerInlineTest}}
+                                                        }
 
                                                 """);
                 }
 
-                var generatedCode = $$"""
-                                        using System;
-                                        using Xunit;
-                                        using System.Diagnostics;
-                                        using PerfUnit;
-                                        using PerfUnit.SharedStandard;
 
-                                        namespace {{ns}};
+                // Build usings string
+                var usingsBuilder = new StringBuilder();
+                foreach (var usingLine in usings)
+                {
+                    usingsBuilder.AppendLine(usingLine);
+                }
+
+                var generatedCode = $$"""
+                                    {{usingsBuilder}}
+
+                                    namespace {{ns}} {
 
                                         public partial class {{className}} {
-                                        {{methodsBuilder}}
+                                            {{methodsBuilder}}
                                         }
-                                        """;
+                                    }
+                                    """;
 
                 spc.AddSource($"{className}.g.cs", SourceText.From(generatedCode, Encoding.UTF8));
             }
@@ -169,6 +238,34 @@ public class PerformanceFactGenerator : IIncrementalGenerator
     }
 
 
+
+    string RemovePerfFromChain(ExpressionSyntax expr)
+    {
+        // If this is an invocation of .Perf(), replace it with its receiver
+        if (expr is InvocationExpressionSyntax inv &&
+            inv.Expression is MemberAccessExpressionSyntax member &&
+            member.Name.Identifier.Text == "Perf")
+        {
+            // Replace .Perf() with its receiver, but keep any further member accesses or invocations
+            return RemovePerfFromChain(member.Expression);
+        }
+        // If this is an invocation (e.g., .HeavyLinq()), reconstruct it
+        else if (expr is InvocationExpressionSyntax inv2)
+        {
+            var exprPart = RemovePerfFromChain(inv2.Expression);
+            return exprPart + inv2.ArgumentList.ToString();
+        }
+        // If this is a member access (e.g., .HeavyLinq), reconstruct it
+        else if (expr is MemberAccessExpressionSyntax member2)
+        {
+            var exprPart = RemovePerfFromChain(member2.Expression);
+            return exprPart + "." + member2.Name.Identifier.Text;
+        }
+        else
+        {
+            return expr.ToString();
+        }
+    }
 
     private (double, MustTake)? GetExpectedNanoSecondsAndComparer(MethodDeclarationSyntax method, SemanticModel semanticModel)
     {
@@ -235,8 +332,8 @@ public class PerformanceFactGenerator : IIncrementalGenerator
             double bytes = unit switch
             {
                 SizeUnit.Bytes => value,
-                SizeUnit.Kilobytes => value * 1_000.0,
-                SizeUnit.Megabytes => value * 1_000_000.0,
+                SizeUnit.Kilobytes => Math.Round(value * 1_000.0,4),
+                SizeUnit.Megabytes => Math.Round(value * 1_000_000.0, 4),
                 _ => throw new InvalidOperationException("Invalid size unit")
             };
 
@@ -267,7 +364,7 @@ public class PerformanceFactGenerator : IIncrementalGenerator
     private static readonly DiagnosticDescriptor MultipleActsRule = new(
         id: "PERF001",
         title: "Multiple .Perf() calls are not allowed",
-        messageFormat: "Method '{0}' contains more than one .Perf() call.",
+        messageFormat: "Method '{0}' contains more than one .Perf() call",
         category: "Usage",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -275,7 +372,7 @@ public class PerformanceFactGenerator : IIncrementalGenerator
     private static readonly DiagnosticDescriptor NoPerformanceCheckRule = new(
        id: "PERF002",
        title: "No Performance Checks used",
-       messageFormat: "Method '{0}' does not contain any performance checks\nBenchmarking will run, but no memory or speed comparisons will occur",
+       messageFormat: "Method '{0}' does not contain any performance checks. Benchmarking will run, but no memory or speed comparisons will occur.",
        category: "Usage",
        DiagnosticSeverity.Warning,
        isEnabledByDefault: true);
