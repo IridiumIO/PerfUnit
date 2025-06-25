@@ -5,14 +5,14 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
-
+using static PerfUnit.SharedStandard.Format;
 
 public static class SimpleBenchmarker
 {
 
     private static readonly int discardCount = 1;
     private static readonly double desiredZ = 1.96;
-    private static readonly double desiredRelativeMargin = 0.005; 
+    private static readonly double desiredRelativeMargin = 0.005;
 
     private static readonly Stopwatch stopwatch = new Stopwatch();
 
@@ -114,27 +114,27 @@ public static class SimpleBenchmarker
     }
 
 
-    public static (double, double) Run(
-        Action action,
-        int minTotalMilliseconds = 100,
-
-        int minInvocations = 4,
-
-        int minWarmupCount = 10,
-        int maxWarmupCount = 50,
-        int warmupCount = 0,
-
-        int minIterationCount = 5,
-        int maxIterationCount = 50,
-        int iterationCount = 0,
-
-        int jitWarmupInvocations = 10,
-        int jitWarmupCount = 3,
-
-        double expectedMaxTimeMs = 0,
-        double expectedMaxMemoryBytes = 0
-        )
+    public static (double, double) Run(Action action, BenchmarkConfig? config = null)
     {
+
+        config ??= new BenchmarkConfig();
+
+        ValidateConfig(action, config);
+
+        int minTotalMilliseconds = config.MinTotalMilliseconds;
+        int minInvocations = config.MinInvocations;
+        int minWarmupCount = config.MinWarmupCount;
+        int maxWarmupCount = config.MaxWarmupCount;
+        int warmupCount = config.WarmupCount;
+        int minIterationCount = config.MinIterationCount;
+        int maxIterationCount = config.MaxIterationCount;
+        int iterationCount = config.IterationCount;
+        int jitWarmupInvocations = config.JitWarmupInvocations;
+        int jitWarmupCount = config.JitWarmupCount;
+        double expectedMaxTimeMs = config.ExpectedMaxTimeMs;
+        double expectedMaxMemoryBytes = config.ExpectedMaxMemoryBytes;
+
+
         Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.RealTime;
         Thread.CurrentThread.Priority = ThreadPriority.Highest;
 
@@ -149,25 +149,6 @@ public static class SimpleBenchmarker
             minIterationCount = iterationCount;
             maxIterationCount = iterationCount;
         }
-
-        if (minTotalMilliseconds < 50)
-            throw new ArgumentException("minTotalMilliseconds must be at least 100 milliseconds");
-        if (minInvocations < 1)
-            throw new ArgumentException("minInvocations must be at least 1");
-        if (minWarmupCount < 1)
-            throw new ArgumentException("minWarmupCount must be at least 1");
-        if (minWarmupCount > maxWarmupCount)
-            throw new ArgumentException("maxWarmupCount must be greater than or equal to minWarmupCount");
-        if (minIterationCount < 1)
-            throw new ArgumentException("minIterationCount must be at least 1");
-        if (minIterationCount > maxIterationCount)
-            throw new ArgumentException("maxIterationCount must be greater than or equal to minIterationCount");
-        if (jitWarmupInvocations < 1)
-            throw new ArgumentException("jitWarmupInvocations must be at least 1");
-        if (jitWarmupCount < 1)
-            throw new ArgumentException("jitWarmupCount must be at least 1");
-        if (action == null)
-            throw new ArgumentNullException(nameof(action), "Action cannot be null");
 
 
         Output("Jit Overhead");
@@ -210,16 +191,41 @@ public static class SimpleBenchmarker
     }
 
 
-    private static bool TryShortCircuit(
-        PhaseResult result,
-        double expectedMaxTimeMs,
-        double expectedMaxMemoryBytes)
+    public static (double, double) RunVolatileFast(Action action)
+    {
+        return Run(action, BenchmarkConfig.VolatileFastConfig());
+    }
+
+
+    private static void ValidateConfig(Action action, BenchmarkConfig config)
+    {
+        if (config.MinTotalMilliseconds < 50)
+            throw new ArgumentException("minTotalMilliseconds must be at least 100 milliseconds");
+        if (config.MinInvocations < 1)
+            throw new ArgumentException("minInvocations must be at least 1");
+        if (config.MinWarmupCount < 1)
+            throw new ArgumentException("minWarmupCount must be at least 1");
+        if (config.MinWarmupCount > config.MaxWarmupCount)
+            throw new ArgumentException("maxWarmupCount must be greater than or equal to minWarmupCount");
+        if (config.MinIterationCount < 1)
+            throw new ArgumentException("minIterationCount must be at least 1");
+        if (config.MinIterationCount > config.MaxIterationCount)
+            throw new ArgumentException("maxIterationCount must be greater than or equal to minIterationCount");
+        if (config.JitWarmupInvocations < 1)
+            throw new ArgumentException("jitWarmupInvocations must be at least 1");
+        if (config.JitWarmupCount < 1)
+            throw new ArgumentException("jitWarmupCount must be at least 1");
+        if (action == null)
+            throw new ArgumentNullException(nameof(action), "Action cannot be null");
+    }
+
+    private static bool TryShortCircuit(PhaseResult result, double expectedMaxTimeMs, double expectedMaxMemoryBytes)
     {
 
         var expectedMaxTimeNs = expectedMaxTimeMs * 1_000_000; // Convert ms to ns
 
         // Both thresholds specified: require both to be satisfied
-        if (expectedMaxTimeNs > 0 && expectedMaxMemoryBytes > 0)
+        if (expectedMaxTimeNs >= 0 && expectedMaxMemoryBytes >= 0)
         {
             if (result.AvgNsPerOp < expectedMaxTimeNs && result.AverageBytes < expectedMaxMemoryBytes)
             {
@@ -228,8 +234,9 @@ public static class SimpleBenchmarker
                 return true;
             }
         }
+
         // Only time threshold specified
-        else if (expectedMaxTimeNs > 0 && expectedMaxMemoryBytes == 0)
+        else if (expectedMaxTimeNs >= 0 && expectedMaxMemoryBytes == -1)
         {
             if (result.AvgNsPerOp < expectedMaxTimeNs)
             {
@@ -238,8 +245,9 @@ public static class SimpleBenchmarker
                 return true;
             }
         }
+
         // Only memory threshold specified
-        else if (expectedMaxMemoryBytes > 0 && expectedMaxTimeNs == 0)
+        else if (expectedMaxMemoryBytes >= 0 && expectedMaxTimeNs < 0)
         {
             if (result.AverageBytes < expectedMaxMemoryBytes)
             {
@@ -248,78 +256,56 @@ public static class SimpleBenchmarker
                 return true;
             }
         }
+
         return false;
     }
-
-
-    private static string FormatTime(double nanosecondtime)
-    {
-        return nanosecondtime switch
-        {
-            < 1_0 => $"{nanosecondtime,6:F4} ns",
-            < 1_000 => $"{nanosecondtime,6:F2} ns",
-            < 1_000_000 => $"{(nanosecondtime / 1_000),6:F2} us",
-            < 1_000_000_000 => $"{(nanosecondtime / 1_000_000),6:F2} ms",
-            _ => $"{(nanosecondtime / 1_000_000_000),6:F2} s"
-        };
-    }
-
-    private static string FormatMemory(double bytes)
-    {
-        return bytes switch
-        {
-            < 1_000 => $"{bytes,6} B",
-            < 1_000_000 => $"{(bytes / 1_000.0),6:F2} KB",
-            < 1_000_000_000 => $"{(bytes / 1_000_000.0),6:F2} MB",
-            _ => $"{(bytes / 1_000_000_000.0),6:F2} GB"
-        };
-    }
-
-
-    public static (double, double) RunVolatileFast(Action action)
-    {
-        return Run(action, 100, 1, 1, 1, 1, 1, 1, 1, 1, 1);
-    }
-
-
-
-
-
 
 
 
 }
 
 
-public static class EnumerableExtensions
+public class BenchmarkConfig
 {
-    public static double Median(this IEnumerable<double> source)
-    {
-        if (source == null) throw new ArgumentNullException(nameof(source));
-        var sorted = source.OrderBy(x => x).ToArray();
-        int count = sorted.Length;
-        if (count == 0) throw new InvalidOperationException("Sequence contains no elements");
+    public int MinTotalMilliseconds { get; set; } = 100;
 
-        int mid = count / 2;
-        if (count % 2 == 0)
-            return (sorted[mid - 1] + sorted[mid]) / 2.0;
-        else
-            return sorted[mid];
+    public int MinInvocations { get; set; } = 4;
+
+    public int MinWarmupCount { get; set; } = 10;
+    public int MaxWarmupCount { get; set; } = 50;
+    public int WarmupCount { get; set; } = 0;
+
+    public int MinIterationCount { get; set; } = 5;
+    public int MaxIterationCount { get; set; } = 50;
+    public int IterationCount { get; set; } = 0;
+
+    public int JitWarmupInvocations { get; set; } = 10;
+    public int JitWarmupCount { get; set; } = 3;
+
+    public double ExpectedMaxTimeMs { get; set; } = -1;
+    public double ExpectedMaxMemoryBytes { get; set; } = -1;
+
+    public BenchmarkConfig() { }
+
+    public BenchmarkConfig(int minTotalMilliseconds = 100, int minInvocations = 4, int minWarmupCount=10, int maxWarmupCount=50, int warmupCount=0,
+        int minIterationCount=5, int maxIterationCount=50, int iterationCount=0, int jitWarmupInvocations=10, int jitWarmupCount=3,
+        double expectedMaxTimeMs=-1, double expectedMaxMemoryBytes=-1)
+    {
+        MinTotalMilliseconds = minTotalMilliseconds;
+        MinInvocations = minInvocations;
+        MinWarmupCount = minWarmupCount;
+        MaxWarmupCount = maxWarmupCount;
+        WarmupCount = warmupCount;
+        MinIterationCount = minIterationCount;
+        MaxIterationCount = maxIterationCount;
+        IterationCount = iterationCount;
+        JitWarmupInvocations = jitWarmupInvocations;
+        JitWarmupCount = jitWarmupCount;
+        ExpectedMaxTimeMs = expectedMaxTimeMs;
+        ExpectedMaxMemoryBytes = expectedMaxMemoryBytes;
     }
 
-    public static double[] FilterIQR(this IEnumerable<double> source)
-    {
-        if (source == null) throw new ArgumentNullException(nameof(source));
-        var sorted = source.OrderBy(x => x).ToArray();
-        int n = sorted.Length;
-        if (n < 4) return sorted; // Not enough data for IQR, return as is
 
-        double q1 = sorted[n / 4];
-        double q3 = sorted[(3 * n) / 4];
-        double iqr = q3 - q1;
-        double lower = q1 - 1.5 * iqr;
-        double upper = q3 + 1.5 * iqr;
-        return sorted.Where(x => x >= lower && x <= upper).ToArray();
-    }
+    public static BenchmarkConfig VolatileFastConfig() => new BenchmarkConfig(100, 1, 1, 1, 1, 1, 1, 1, 1, 1);
 
 }

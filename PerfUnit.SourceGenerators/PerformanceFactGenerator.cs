@@ -1,10 +1,11 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
-using System;
-using System.Collections.Generic;
-using System.Text;
 using PerfUnit.SharedStandard;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Linq;
+using System.Text;
 
 namespace PerfUnit.SourceGenerators;
 
@@ -14,248 +15,302 @@ public class PerformanceFactGenerator : IIncrementalGenerator
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var methodDeclarations = context.SyntaxProvider
-        .CreateSyntaxProvider(
-            predicate: (s, _) => s is MethodDeclarationSyntax method &&
-                                 method.AttributeLists.ToString().Contains("PerformanceFact"),
-            transform: (ctx, _) => (
-                Method: (MethodDeclarationSyntax)ctx.Node,
-                SemanticModel: ctx.SemanticModel
-            ))
-        .Collect();
+            .CreateSyntaxProvider(
+                predicate: IsPerformanceFactMethod,
+                transform: TransformToMethodTuple)
+            .Collect();
 
-        context.RegisterSourceOutput(methodDeclarations, (spc, methodTuples) =>
-        {
-
-            // Group methods by (namespace, className)
-            var classGroups = new Dictionary<(string Namespace, string ClassName), List<(MethodDeclarationSyntax, SemanticModel)>>();
-
-
-            foreach (var (method, semanticModel) in methodTuples)
-            {
-                var classDecl = method.Parent as ClassDeclarationSyntax;
-                if (classDecl == null) continue;
-
-                var ns = GetNamespace(classDecl);
-                var className = classDecl.Identifier.Text;
-                var key = (ns, className);
-
-                if (!classGroups.TryGetValue(key, out var list))
-                {
-                    list = new List<(MethodDeclarationSyntax, SemanticModel)>();
-                    classGroups[key] = list;
-                }
-                list.Add((method, semanticModel));
-            }
-
-
-            // Generate one file per class group
-            foreach (var classGroup in classGroups)
-            {
-                var ns = classGroup.Key.Namespace;
-                var className = classGroup.Key.ClassName;
-                var methodList = classGroup.Value;
-
-                var methodsBuilder = new StringBuilder();
-
-
-                HashSet<string> usings = ["using System;", "using Xunit;", "using PerfUnit;", "using PerfUnit.SharedStandard;"];
-
-                foreach (var (method, semanticModel) in methodList)
-                {
-
-                    var root = method.SyntaxTree.GetRoot();
-                    var usingDirectives = root.DescendantNodes()
-                        .OfType<UsingDirectiveSyntax>();
-                    foreach (var usingDirective in usingDirectives)
-                    {
-                        usings.Add(usingDirective.ToFullString().Trim());
-                    }
-
-
-
-                    int actCount = 0;
-                    var methodName = method.Identifier.Text;
-
-                    // Get only the statements inside the method body (no braces)
-                    var bodyStatements = method.Body?.Statements ?? default;
-
-                    foreach (var statement in bodyStatements)
-                    {
-                        var line = statement.ToFullString();
-                        if (line.Contains(".Perf()"))
-                            actCount++;
-                    }
-
-
-                    if (actCount > 1)
-                    {
-                        // Report a warning diagnostic at the method location
-                        var diagnostic = Diagnostic.Create(
-                            MultipleActsRule,
-                            method.GetLocation(),
-                            methodName);
-                        spc.ReportDiagnostic(diagnostic);
-                        // Optionally, skip code generation for this method
-                        continue;
-                    }
-
-                    //Get other attributes
-                    var attributeLines = new StringBuilder();
-                    foreach (var attrList in method.AttributeLists)
-                    {
-                        foreach (var attr in attrList.Attributes)
-                        {
-                            var attrName = attr.Name.ToString();
-                            if (!attrName.Contains("Fact") && !attrName.Contains("PerfSpeed") && !attrName.Contains("PerfMemory")) // filter out if needed
-                            {
-                                attributeLines.AppendLine($"[{attr}]");
-                            }
-                        }
-                    }
-
-                    var methodBody = new StringBuilder();
-
-                    string expressionline = String.Empty;
-
-                    foreach (var statement in bodyStatements)
-                    {
-
-                        // Find all invocation expressions in the statement
-                        var invocations = statement.DescendantNodesAndSelf()
-                            .OfType<InvocationExpressionSyntax>();
-
-                        foreach (var invocation in invocations)
-                        {
-                            
-
-
-                            if (invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
-                                 memberAccess.Name.Identifier.Text == "Perf")
-                            {
-                                // Find the outermost invocation/member access containing this .Perf() call
-                                SyntaxNode outer = invocation;
-                                while ( outer.Parent is InvocationExpressionSyntax || outer.Parent is MemberAccessExpressionSyntax)
-                                {
-                                    outer = outer.Parent;
-                                }
-
-                                // Remove .Perf() from the outermost expression
-                                var cleanedExpr = RemovePerfFromChain((ExpressionSyntax)outer);
-
-                                // Use semantic model to get the symbol and return type for the cleaned, outermost invocation
-                                var symbolInfo = semanticModel.GetSymbolInfo(outer);
-                                var methodSymbol = symbolInfo.Symbol as IMethodSymbol;
-                                ITypeSymbol returnType = methodSymbol?.ReturnType;
-
-                                if (returnType != null && returnType.SpecialType == SpecialType.System_Void)
-                                {
-                                    expressionline = cleanedExpr;
-                                }
-                                else
-                                {
-                                    expressionline = "var _dis_ = " + cleanedExpr;
-                                }
-                                break;
-                            }
-
-
-                        }
-
-                        methodBody.Append(statement.ToFullString().Replace(".Perf()", ""));
-
-                    }
-
-                    var timeAndComparer = GetExpectedNanoSecondsAndComparer(method, semanticModel);
-                    string timeAndComparerInlineTest = timeAndComparer.HasValue
-                        ? $$"""
-                            if (benchTime {{(timeAndComparer.Value.Item2 == MustTake.LessThan ? ">=" : ">")}} {{timeAndComparer.Value.Item1}})
-                                        throw new Xunit.Sdk.XunitException($"Expected execution to be under {{PrettyTime.FormatTime(timeAndComparer.Value.Item1)}}, but took {PrettyTime.FormatTime(benchTime)}");
-                        
-                            """        
-                        : string.Empty;
-
-                    var memoryAndComparer = GetExpectedMemoryAndComparer(method, semanticModel);
-                    string memoryAndComparerInlineTest = memoryAndComparer.HasValue
-                        ? $$"""
-                            if (memory {{(memoryAndComparer.Value.Item2 == MustUse.LessThan ? ">=" : ">")}} {{memoryAndComparer.Value.Item1}})
-                                        throw new Xunit.Sdk.XunitException($"Expected memory usage to be under {{memoryAndComparer.Value.Item1}} bytes, but used {memory} bytes");
-                        
-                            """        
-                        : string.Empty;
-
-                    if (!(timeAndComparer.HasValue || memoryAndComparer.HasValue))
-                    {
-                        var diagnostic = Diagnostic.Create(
-                            NoPerformanceCheckRule,
-                            method.GetLocation(),
-                            methodName);
-                        spc.ReportDiagnostic(diagnostic);
-                    }
-
-                    methodsBuilder.AppendLine($$"""
-                                                        {{attributeLines}}
-                                                        [Fact(DisplayName = "{{methodName}}")]
-                                                        public void {{methodName}}_g() {
-                                                            {{methodBody}}
-
-                                                            var (benchTime, memory) = SimpleBenchmarker.Run(() =>
-                                                            {
-                                                                {{expressionline}};
-                                                            }, 
-                                                            expectedMaxMemoryBytes:{{(memoryAndComparer.HasValue ? memoryAndComparer.Value.Item1 : 0)}}, 
-                                                            expectedMaxTimeMs: {{(timeAndComparer.HasValue ? timeAndComparer.Value.Item1 / 1_000_000.0 : 0)}}
-                                                            );
-                                                        
-                                                            {{timeAndComparerInlineTest}}
-                                                            {{memoryAndComparerInlineTest}}
-                                                        }
-
-                                                """);
-                }
-
-
-                // Build usings string
-                var usingsBuilder = new StringBuilder();
-                foreach (var usingLine in usings)
-                {
-                    usingsBuilder.AppendLine(usingLine);
-                }
-
-                var generatedCode = $$"""
-                                    {{usingsBuilder}}
-
-                                    namespace {{ns}} {
-
-                                        public partial class {{className}} {
-                                            {{methodsBuilder}}
-                                        }
-                                    }
-                                    """;
-
-                spc.AddSource($"{className}.g.cs", SourceText.From(generatedCode, Encoding.UTF8));
-            }
-        });
+        context.RegisterSourceOutput(methodDeclarations, GeneratePerformanceFactClasses);
     }
 
 
+    private static bool IsPerformanceFactMethod(SyntaxNode node, CancellationToken _)
+        => node is MethodDeclarationSyntax method &&
+           method.AttributeLists.ToString().Contains("PerformanceFact");
 
-    string RemovePerfFromChain(ExpressionSyntax expr)
+
+    private static (MethodDeclarationSyntax Method, SemanticModel SemanticModel) TransformToMethodTuple(GeneratorSyntaxContext ctx, CancellationToken _)
+        => ((MethodDeclarationSyntax)ctx.Node, ctx.SemanticModel);
+
+
+    private void GeneratePerformanceFactClasses(SourceProductionContext context, ImmutableArray<(MethodDeclarationSyntax Method, SemanticModel SemanticModel)> methodTuples)
     {
-        // If this is an invocation of .Perf(), replace it with its receiver
+        var classGroups = GroupMethodsByClass(methodTuples);
+
+        foreach (var classGroup in classGroups)
+        {
+            var ns = classGroup.Key.Namespace;
+            var className = classGroup.Key.ClassName;
+            var methodList = classGroup.Value;
+
+            var usings = CollectUsings(methodList);
+            var methodsBuilder = new StringBuilder();
+
+            foreach (var (method, semanticModel) in methodList)
+            {
+                if (!TryGeneratePerformanceFactMethod(context, method, semanticModel, out var methodCode))
+                    continue;
+
+                methodsBuilder.AppendLine(methodCode);
+            }
+
+            var usingsBuilder = new StringBuilder();
+            foreach (var usingLine in usings)
+                usingsBuilder.AppendLine(usingLine);
+
+            var generatedCode = $$"""
+                {{usingsBuilder}}
+
+                namespace {{ns}} {
+                    
+                    [Collection("PerfUnit.SequentialTests")]
+                    public partial class {{className}} {
+                        {{methodsBuilder}}
+                    }
+                }
+                """;
+
+            context.AddSource($"{className}.g.cs", SourceText.From(generatedCode, Encoding.UTF8));
+        }
+    }
+
+    private static Dictionary<(string Namespace, string ClassName), List<(MethodDeclarationSyntax, SemanticModel)>> GroupMethodsByClass(
+        ImmutableArray<(MethodDeclarationSyntax Method, SemanticModel SemanticModel)> methodTuples)
+    {
+        var classGroups = new Dictionary<(string Namespace, string ClassName), List<(MethodDeclarationSyntax, SemanticModel)>>();
+
+        foreach (var (method, semanticModel) in methodTuples)
+        {
+            var classDecl = method.Parent as ClassDeclarationSyntax;
+            if (classDecl == null) continue;
+
+            var ns = GetNamespace(classDecl);
+            var className = classDecl.Identifier.Text;
+            var key = (ns, className);
+
+            if (!classGroups.TryGetValue(key, out var list))
+            {
+                list = new List<(MethodDeclarationSyntax, SemanticModel)>();
+                classGroups[key] = list;
+            }
+            list.Add((method, semanticModel));
+        }
+
+        return classGroups;
+    }
+
+    private static HashSet<string> CollectUsings(List<(MethodDeclarationSyntax, SemanticModel)> methodList)
+    {
+        var usings = new HashSet<string>
+        {
+            "using System;",
+            "using Xunit;",
+            "using PerfUnit;",
+            "using PerfUnit.SharedStandard;"
+        };
+
+        foreach (var (method, _) in methodList)
+        {
+            var root = method.SyntaxTree.GetRoot();
+            var usingDirectives = root.DescendantNodes()
+                .OfType<UsingDirectiveSyntax>();
+            foreach (var usingDirective in usingDirectives)
+            {
+                usings.Add(usingDirective.ToFullString().Trim());
+            }
+        }
+        return usings;
+    }
+
+    private bool TryGeneratePerformanceFactMethod(SourceProductionContext ctx, MethodDeclarationSyntax method, SemanticModel semanticModel, out string methodCode)
+    {
+        methodCode = string.Empty;
+        int perfCallCount = CountPerfCalls(method);
+
+        if (perfCallCount > 1)
+        {
+            ReportDiagnostic(ctx, MultipleActsRule, semanticModel, method, method.Identifier.Text);
+            return false;
+        }
+
+        var attributeLines = GetNonFactAttributes(method);
+        var methodBody = GetMethodBodyWithoutPerf(method);
+        var expressionLine = GetPerfExpressionLine(method, semanticModel);
+
+        var timeAndComparer = GetExpectedNanoSecondsAndComparer(method, semanticModel);
+        var timeCheck = GetTimeCheckInlineTest(timeAndComparer);
+
+        var memoryAndComparer = GetExpectedMemoryAndComparer(method, semanticModel);
+        var memoryCheck = GetMemoryCheckInlineTest(memoryAndComparer);
+
+        if (!(timeAndComparer.HasValue || memoryAndComparer.HasValue))
+        {
+            ReportDiagnostic(ctx, NoPerformanceCheckRule, semanticModel, method, method.Identifier.Text);
+        }
+
+        methodCode = $$"""
+            {{attributeLines}}
+            [Fact(DisplayName = "{{method.Identifier.Text}}")]
+            public void {{method.Identifier.Text}}_g() {
+                {{methodBody}}
+
+                var (benchTime, memory) = SimpleBenchmarker.Run(() =>
+                {
+                    {{expressionLine}};
+                }, 
+                new BenchmarkConfig() {ExpectedMaxMemoryBytes = {{(memoryAndComparer.HasValue ? memoryAndComparer.Value.Item1 : -1)}}, ExpectedMaxTimeMs = {{(timeAndComparer.HasValue ? timeAndComparer.Value.Item1 / 1_000_000.0 : -1)}}}
+                );
+            
+                {{timeCheck}}
+                {{memoryCheck}}
+            }
+        """;
+        return true;
+    }
+
+    //expectedMaxMemoryBytes:{{(memoryAndComparer.HasValue? memoryAndComparer.Value.Item1 : -1)}}, 
+    //            expectedMaxTimeMs: { { (timeAndComparer.HasValue ? timeAndComparer.Value.Item1 / 1_000_000.0 : -1)} }
+
+private static int CountPerfCalls(MethodDeclarationSyntax method)
+    {
+
+        var body = method.Body?.ToFullString();
+        const string perfMarker = ".Perf()";
+
+        int count = 0;
+
+        for (var i = 0; i < body?.Length - perfMarker.Length; i++)
+        {
+            if (body.Substring(i, perfMarker.Length) == perfMarker)
+            {
+                count++;
+                i += perfMarker.Length - 1; 
+            }
+        }
+
+        return count;
+    }
+
+    private static string GetNonFactAttributes(MethodDeclarationSyntax method)
+    {
+        var attributeLines = new StringBuilder();
+        foreach (var attrList in method.AttributeLists)
+        {
+            foreach (var attr in attrList.Attributes)
+            {
+                var attrName = attr.Name.ToString();
+                if (!attrName.Contains("Fact") && !attrName.Contains("PerfSpeed") && !attrName.Contains("PerfMemory"))
+                {
+                    attributeLines.AppendLine($"[{attr}]");
+                }
+            }
+        }
+        return attributeLines.ToString();
+    }
+
+    private static string GetMethodBodyWithoutPerf(MethodDeclarationSyntax method)
+    {
+        var methodBody = new StringBuilder();
+        var bodyStatements = method.Body?.Statements ?? default;
+        foreach (var statement in bodyStatements)
+        {
+            methodBody.Append(statement.ToFullString().Replace(".Perf()", ""));
+        }
+        return methodBody.ToString();
+    }
+
+    private static string GetPerfExpressionLine(MethodDeclarationSyntax method, SemanticModel semanticModel)
+    {
+        var bodyStatements = method.Body?.Statements ?? default;
+        foreach (var statement in bodyStatements)
+        {
+            var invocations = statement.DescendantNodesAndSelf()
+                .OfType<InvocationExpressionSyntax>();
+
+            foreach (var invocation in invocations)
+            {
+                if (invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
+                    memberAccess.Name.Identifier.Text == "Perf")
+                {
+                    // Find the outermost invocation/member access containing this .Perf() call
+                    SyntaxNode outer = invocation;
+                    while (outer.Parent is InvocationExpressionSyntax || outer.Parent is MemberAccessExpressionSyntax)
+                    {
+                        outer = outer.Parent;
+                    }
+
+                    // Remove .Perf() from the outermost expression
+                    var cleanedExpr = RemovePerfFromChain((ExpressionSyntax)outer);
+
+                    // Use semantic model to get the symbol and return type for the cleaned, outermost invocation
+                    var symbolInfo = semanticModel.GetSymbolInfo(outer);
+                    var methodSymbol = symbolInfo.Symbol as IMethodSymbol;
+                    ITypeSymbol returnType = methodSymbol?.ReturnType;
+
+                    if (returnType != null && returnType.SpecialType == SpecialType.System_Void)
+                    {
+                        return cleanedExpr;
+                    }
+                    else
+                    {
+                        return "var _dis_ = " + cleanedExpr;
+                    }
+                }
+            }
+        }
+
+        //If no .Perf() call found, return the entire method body as a fallback
+        if (bodyStatements.Count > 0) return string.Concat(bodyStatements.Select(s => s.ToFullString()));
+
+        return string.Empty;
+    }
+
+    private static string GetTimeCheckInlineTest((double, MustTake)? timeAndComparer)
+    {
+        if (!timeAndComparer.HasValue) return string.Empty;
+        var (time, comparer) = timeAndComparer.Value;
+        var op = comparer == MustTake.LessThan ? "<" : "<=";
+
+        var errorMessage = $"Expected execution to take {op} {Format.FormatTime(time, true)}, but took {{Format.FormatTime(benchTime, true)}}";
+
+        return $$"""
+            Assert.True(benchTime {{op}} {{time}}, $"{{errorMessage}}");
+            """;
+    }
+
+    private static string GetMemoryCheckInlineTest((double, MustUse)? memoryAndComparer)
+    {
+        if (!memoryAndComparer.HasValue) return string.Empty;
+        var (memory, comparer) = memoryAndComparer.Value;
+        var op = comparer == MustUse.LessThan ? "<" : "<=";
+
+        var errorMessage = $"Expected memory usage to be {op} {{memory}} bytes, but used {memory} bytes";
+
+        return $$"""
+            Assert.True(memory {{op}} {{memory}}, $"{{errorMessage}}");
+            """;
+    }
+
+    private static void ReportDiagnostic(SourceProductionContext ctx, DiagnosticDescriptor rule, SemanticModel semanticModel, MethodDeclarationSyntax method, string methodName)
+    {
+        var diagnostic = Diagnostic.Create(rule, method.GetLocation(),methodName);
+        ctx.ReportDiagnostic(diagnostic);
+    }
+
+
+    static string RemovePerfFromChain(ExpressionSyntax expr)
+    {
         if (expr is InvocationExpressionSyntax inv &&
             inv.Expression is MemberAccessExpressionSyntax member &&
             member.Name.Identifier.Text == "Perf")
         {
-            // Replace .Perf() with its receiver, but keep any further member accesses or invocations
             return RemovePerfFromChain(member.Expression);
         }
-        // If this is an invocation (e.g., .HeavyLinq()), reconstruct it
         else if (expr is InvocationExpressionSyntax inv2)
         {
             var exprPart = RemovePerfFromChain(inv2.Expression);
             return exprPart + inv2.ArgumentList.ToString();
         }
-        // If this is a member access (e.g., .HeavyLinq), reconstruct it
         else if (expr is MemberAccessExpressionSyntax member2)
         {
             var exprPart = RemovePerfFromChain(member2.Expression);
@@ -278,7 +333,6 @@ public class PerformanceFactGenerator : IIncrementalGenerator
 
         if (perfSpeedAttr != null)
         {
-            // Constructor: PerfSpeedAttribute(MustTake comparison, double value, TimeUnit unit = TimeUnit.Milliseconds)
             var comparison = perfSpeedAttr.ConstructorArguments[0].Value is int cmpVal
                 ? (MustTake)cmpVal
                 : MustTake.LessThan;
@@ -289,7 +343,6 @@ public class PerformanceFactGenerator : IIncrementalGenerator
                 ? (TimeUnit)unitVal
                 : TimeUnit.Milliseconds;
 
-            // Convert to nanoseconds
             double nanoseconds = unit switch
             {
                 TimeUnit.Nanoseconds => value,
@@ -317,7 +370,6 @@ public class PerformanceFactGenerator : IIncrementalGenerator
 
         if (perfMemAttr != null)
         {
-            // Constructor: PerfSpeedAttribute(MustTake comparison, double value, TimeUnit unit = TimeUnit.Milliseconds)
             var comparison = perfMemAttr.ConstructorArguments[0].Value is int cmpVal
                 ? (MustUse)cmpVal
                 : MustUse.LessThan;
@@ -328,11 +380,10 @@ public class PerformanceFactGenerator : IIncrementalGenerator
                 ? (SizeUnit)unitVal
                 : SizeUnit.Bytes;
 
-            // Convert to nanoseconds
             double bytes = unit switch
             {
                 SizeUnit.Bytes => value,
-                SizeUnit.Kilobytes => Math.Round(value * 1_000.0,4),
+                SizeUnit.Kilobytes => Math.Round(value * 1_000.0, 4),
                 SizeUnit.Megabytes => Math.Round(value * 1_000_000.0, 4),
                 _ => throw new InvalidOperationException("Invalid size unit")
             };
@@ -343,23 +394,18 @@ public class PerformanceFactGenerator : IIncrementalGenerator
         return null;
     }
 
-
     private static string GetNamespace(ClassDeclarationSyntax classDeclarationSyntax)
     {
-        // Check for block-scoped namespace
         var namespaceNode = classDeclarationSyntax.FirstAncestorOrSelf<NamespaceDeclarationSyntax>();
         if (namespaceNode != null)
             return namespaceNode.Name.ToString();
 
-        // Check for file-scoped namespace (C# 10+)
         var fileScopedNamespace = classDeclarationSyntax.FirstAncestorOrSelf<FileScopedNamespaceDeclarationSyntax>();
         if (fileScopedNamespace != null)
             return fileScopedNamespace.Name.ToString();
 
-        // No namespace found (global namespace)
         return string.Empty;
     }
-
 
     private static readonly DiagnosticDescriptor MultipleActsRule = new(
         id: "PERF001",
