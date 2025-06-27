@@ -10,7 +10,7 @@
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>PerfUnit.SourceGenerators</PackageId>
-    <Version>1.0.0</Version>
+    <Version>0.1.0</Version>
     <Authors>IridiumIO</Authors>
     <Description>Source Generators for the PerfUnit Library. Will be installed automatically.</Description>
   </PropertyGroup>
@@ -33,7 +33,7 @@
   </ItemGroup>
 
    <ItemGroup>
-     <PackageReference Include="PerfUnit.SharedStandard" GeneratePathProperty="true" PrivateAssets="all" Version="1.0.0" />  
+     <PackageReference Include="PerfUnit.SharedStandard" GeneratePathProperty="true" PrivateAssets="all" Version="0.1.0" />  
      <None Include="..\PerfUnit.SharedStandard\bin\$(Configuration)\netstandard2.0\PerfUnit.SharedStandard.dll" Pack="true" PackagePath="analyzers/dotnet/cs" OutputItemType="Analyzer" />
    </ItemGroup>
 

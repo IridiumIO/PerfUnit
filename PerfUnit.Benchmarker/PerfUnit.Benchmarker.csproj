@@ -5,7 +5,7 @@
     <LangVersion>11.0</LangVersion>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>PerfUnit.Benchmarker</PackageId>
-    <Version>1.0.0</Version>
+    <Version>0.1.0</Version>
     <Authors>IridiumIO</Authors>
     <Description>Benchmarker for the PerfUnit library. Will be installed automatically.</Description>
   </PropertyGroup>
@@ -15,7 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="PerfUnit.SharedStandard" Version="1.0.0" />
+    <PackageReference Include="PerfUnit.SharedStandard" Version="0.1.0" />
   </ItemGroup>
   
   

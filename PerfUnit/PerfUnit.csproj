@@ -5,7 +5,7 @@
     <LangVersion>11.0</LangVersion>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>PerfUnit</PackageId>
-    <Version>1.0.0</Version>
+    <Version>0.1.0</Version>
     <Authors>IridiumIO</Authors>
     <Description>Add performance (runtime/memory usage) assertions to unit tests.</Description>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -18,9 +18,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="PerfUnit.Benchmarker" Version="1.0.0" />
-    <PackageReference Include="PerfUnit.SharedStandard" Version="1.0.0" />
-    <PackageReference Include="PerfUnit.SourceGenerators" Version="1.0.0" OutputItemType="Analyzer" />
+    <PackageReference Include="PerfUnit.Benchmarker" Version="*" />
+    <PackageReference Include="PerfUnit.SharedStandard" Version="*" />
+    <PackageReference Include="PerfUnit.SourceGenerators" Version="*" OutputItemType="Analyzer" />
   </ItemGroup>
 
   
