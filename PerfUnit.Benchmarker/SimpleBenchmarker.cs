@@ -7,6 +7,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using static PerfUnit.SharedStandard.Format;
 
+namespace PerfUnit.Benchmarker;
+
 public static class SimpleBenchmarker
 {
 
@@ -27,7 +29,6 @@ public static class SimpleBenchmarker
 
     private static PhaseResult RunPhase(string phaseName, Action action, int invocations, int minIterations, int maxIterations)
     {
-
 
         maxIterations += discardCount;
         var nsPerOp = new List<double>(maxIterations);

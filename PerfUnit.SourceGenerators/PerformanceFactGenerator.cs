@@ -105,7 +105,7 @@ public class PerformanceFactGenerator : IIncrementalGenerator
         {
             "using System;",
             "using Xunit;",
-            "using PerfUnit;",
+            "using PerfUnit.Benchmarker;",
             "using PerfUnit.SharedStandard;"
         };
 
@@ -181,7 +181,7 @@ private static int CountPerfCalls(MethodDeclarationSyntax method)
 
         for (var i = 0; i < body?.Length - perfMarker.Length; i++)
         {
-            if (body.Substring(i, perfMarker.Length) == perfMarker)
+            if (body?.Substring(i, perfMarker.Length) == perfMarker)
             {
                 count++;
                 i += perfMarker.Length - 1; 
@@ -245,7 +245,7 @@ private static int CountPerfCalls(MethodDeclarationSyntax method)
                     // Use semantic model to get the symbol and return type for the cleaned, outermost invocation
                     var symbolInfo = semanticModel.GetSymbolInfo(outer);
                     var methodSymbol = symbolInfo.Symbol as IMethodSymbol;
-                    ITypeSymbol returnType = methodSymbol?.ReturnType;
+                    ITypeSymbol returnType = methodSymbol!.ReturnType;
 
                     if (returnType != null && returnType.SpecialType == SpecialType.System_Void)
                     {

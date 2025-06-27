@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Linq;
 
+namespace PerfUnit.Benchmarker;
+
 public static class EnumerableExtensions
 {
     public static double Median(this IEnumerable<double> source)

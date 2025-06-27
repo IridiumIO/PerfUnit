@@ -3,17 +3,33 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.14.36212.18
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PerfUnit", "PerfUnit\PerfUnit.csproj", "{AB1E94A4-3B8D-4B7E-94A5-BD7714183AC2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PerfUnit.Benchmarker", "PerfUnit.Benchmarker\PerfUnit.Benchmarker.csproj", "{AB1E94A4-3B8D-4B7E-94A5-BD7714183AC2}"
+	ProjectSection(ProjectDependencies) = postProject
+		{C17E9B56-781A-425D-A924-C61B3C3827DB} = {C17E9B56-781A-425D-A924-C61B3C3827DB}
+	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PerfUnit.Test", "PerfUnit.Test\PerfUnit.Test.csproj", "{B9352B96-2FAB-48EE-8F89-DBB0FE1E657A}"
+	ProjectSection(ProjectDependencies) = postProject
+		{564E0661-0EA7-4C0E-9686-90595DDFD98C} = {564E0661-0EA7-4C0E-9686-90595DDFD98C}
+	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PerfUnit.TestCalculator", "PerfUnit.TestCalculator\PerfUnit.TestCalculator.csproj", "{C1F3CC67-2DCA-46DB-A96F-E2570264935B}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PerfUnit.SourceGenerators", "PerfUnit.SourceGenerators\PerfUnit.SourceGenerators.csproj", "{2707B5CA-8837-44BC-A84D-38D10C4830EB}"
+	ProjectSection(ProjectDependencies) = postProject
+		{C17E9B56-781A-425D-A924-C61B3C3827DB} = {C17E9B56-781A-425D-A924-C61B3C3827DB}
+	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PerfUnit.SharedStandard", "PerfUnit.SharedStandard\PerfUnit.SharedStandard.csproj", "{C17E9B56-781A-425D-A924-C61B3C3827DB}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PerfUnit.BenchmarkingTestGrounds", "PerfUnit.BenchmarkingTestGrounds\PerfUnit.BenchmarkingTestGrounds.csproj", "{22F797E7-1A77-40F9-A41C-210FAB0C333E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PerfUnit", "PerfUnit\PerfUnit.csproj", "{564E0661-0EA7-4C0E-9686-90595DDFD98C}"
+	ProjectSection(ProjectDependencies) = postProject
+		{2707B5CA-8837-44BC-A84D-38D10C4830EB} = {2707B5CA-8837-44BC-A84D-38D10C4830EB}
+		{AB1E94A4-3B8D-4B7E-94A5-BD7714183AC2} = {AB1E94A4-3B8D-4B7E-94A5-BD7714183AC2}
+		{C17E9B56-781A-425D-A924-C61B3C3827DB} = {C17E9B56-781A-425D-A924-C61B3C3827DB}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -45,6 +61,10 @@ Global
 		{22F797E7-1A77-40F9-A41C-210FAB0C333E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{22F797E7-1A77-40F9-A41C-210FAB0C333E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{22F797E7-1A77-40F9-A41C-210FAB0C333E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{564E0661-0EA7-4C0E-9686-90595DDFD98C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{564E0661-0EA7-4C0E-9686-90595DDFD98C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{564E0661-0EA7-4C0E-9686-90595DDFD98C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{564E0661-0EA7-4C0E-9686-90595DDFD98C}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

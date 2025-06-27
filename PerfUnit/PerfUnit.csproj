@@ -1,12 +1,29 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
-    <LangVersion>12.0</LangVersion>
+    <TargetFrameworks>net8.0</TargetFrameworks>
+    <LangVersion>11.0</LangVersion>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageId>PerfUnit</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>IridiumIO</Authors>
+    <Description>Add performance (runtime/memory usage) assertions to unit tests.</Description>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\PerfUnit.SharedStandard\PerfUnit.SharedStandard.csproj" />
+    <PackageReference Include="PerfUnit.Benchmarker" Version="1.0.0" />
+    <PackageReference Include="PerfUnit.SharedStandard" Version="1.0.0" />
+    <PackageReference Include="PerfUnit.SourceGenerators" Version="1.0.0" OutputItemType="Analyzer" />
   </ItemGroup>
+
+  
+  
 
 </Project>

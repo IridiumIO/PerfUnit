@@ -3,13 +3,23 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <IncludeBuildOutput>false</IncludeBuildOutput> 
-    <Nullable>enable</Nullable>
+    <Nullable>enable</Nullable>   
     <ImplicitUsings>true</ImplicitUsings>
-    <LangVersion>12.0</LangVersion>
+    <LangVersion>11.0</LangVersion>
     <IsRoslynComponent>true</IsRoslynComponent>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageId>PerfUnit.SourceGenerators</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>IridiumIO</Authors>
+    <Description>Source Generators for the PerfUnit Library. Will be installed automatically.</Description>
   </PropertyGroup>
 
+  
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+  
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="4.14.0">
       <PrivateAssets>all</PrivateAssets>
@@ -23,8 +33,13 @@
   </ItemGroup>
 
    <ItemGroup>
-     <ProjectReference Include="..\PerfUnit.SharedStandard\PerfUnit.SharedStandard.csproj"  GeneratePathProperty="true" PrivateAssets="all" />
+     <PackageReference Include="PerfUnit.SharedStandard" GeneratePathProperty="true" PrivateAssets="all" Version="1.0.0" />  
+     <None Include="..\PerfUnit.SharedStandard\bin\$(Configuration)\netstandard2.0\PerfUnit.SharedStandard.dll" Pack="true" PackagePath="analyzers/dotnet/cs" OutputItemType="Analyzer" />
    </ItemGroup>
+
+   <!--<ItemGroup>
+     <ProjectReference Include="..\PerfUnit.SharedStandard\PerfUnit.SharedStandard.csproj" OutputItemType="Analyzer"/>
+   </ItemGroup>-->
 
   
 </Project>
