@@ -1,0 +1,19 @@
+<Solution>
+  <Project Path="PerfUnit.Benchmarker/PerfUnit.Benchmarker.csproj">
+    <BuildDependency Project="PerfUnit.SharedStandard/PerfUnit.SharedStandard.csproj" />
+  </Project>
+  <Project Path="PerfUnit.BenchmarkingTestGrounds/PerfUnit.BenchmarkingTestGrounds.csproj" />
+  <Project Path="PerfUnit.SharedStandard/PerfUnit.SharedStandard.csproj" />
+  <Project Path="PerfUnit.SourceGenerators/PerfUnit.SourceGenerators.csproj">
+    <BuildDependency Project="PerfUnit.SharedStandard/PerfUnit.SharedStandard.csproj" />
+  </Project>
+  <Project Path="PerfUnit.Test/PerfUnit.Test.csproj">
+    <BuildDependency Project="PerfUnit/PerfUnit.csproj" />
+  </Project>
+  <Project Path="PerfUnit.TestCalculator/PerfUnit.TestCalculator.csproj" />
+  <Project Path="PerfUnit/PerfUnit.csproj">
+    <BuildDependency Project="PerfUnit.Benchmarker/PerfUnit.Benchmarker.csproj" />
+    <BuildDependency Project="PerfUnit.SharedStandard/PerfUnit.SharedStandard.csproj" />
+    <BuildDependency Project="PerfUnit.SourceGenerators/PerfUnit.SourceGenerators.csproj" />
+  </Project>
+</Solution>
