@@ -1,12 +1,14 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net8.0</TargetFrameworks>
+    <TargetFrameworks>net6.0</TargetFrameworks>
     <LangVersion>11.0</LangVersion>
+    <IncludeBuildOutput>false</IncludeBuildOutput> 
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>PerfUnit</PackageId>
     <Version>0.1.0</Version>
     <Authors>IridiumIO</Authors>
+    <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
     <Description>Add performance (runtime/memory usage) assertions to unit tests.</Description>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -18,12 +20,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="PerfUnit.Benchmarker" Version="*" />
-    <PackageReference Include="PerfUnit.SharedStandard" Version="*" />
-    <PackageReference Include="PerfUnit.SourceGenerators" Version="*" OutputItemType="Analyzer" />
+    <None Include="..\PerfUnit.Benchmarker\bin\Release\net6.0\PerfUnit.Benchmarker.dll" PrivateAssets="all" Pack="true" PackagePath="lib/net6.0"/>
+    <None Include="..\PerfUnit.SharedStandard\bin\Release\netstandard2.0\PerfUnit.SharedStandard.dll" PrivateAssets="all" Pack="true" PackagePath="lib/net6.0"/>
+    <None Include="..\PerfUnit.SharedStandard\bin\Release\netstandard2.0\PerfUnit.SharedStandard.dll" PrivateAssets="all" Pack="true" PackagePath="lib/netstandard2.0"/>
+    
+    <None Include="..\PerfUnit.SharedStandard\bin\Release\netstandard2.0\PerfUnit.SharedStandard.dll" PrivateAssets="all" OutputItemType="Analyzer" Pack="true" PackagePath="analyzers/dotnet/cs"/>
+    <None Include="..\PerfUnit.SourceGenerators\bin\Release\netstandard2.0\PerfUnit.SourceGenerators.dll" PrivateAssets="all" OutputItemType="Analyzer" Pack="true" PackagePath="analyzers/dotnet/cs"/>       
   </ItemGroup>
-
   
-  
-
 </Project>
