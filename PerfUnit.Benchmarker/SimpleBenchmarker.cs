@@ -201,7 +201,7 @@ public static class SimpleBenchmarker
     private static void ValidateConfig(Action action, BenchmarkConfig config)
     {
         if (config.MinTotalMilliseconds < 50)
-            throw new ArgumentException("minTotalMilliseconds must be at least 100 milliseconds");
+            throw new ArgumentException("minTotalMilliseconds must be at least 50 milliseconds");
         if (config.MinInvocations < 1)
             throw new ArgumentException("minInvocations must be at least 1");
         if (config.MinWarmupCount < 1)
