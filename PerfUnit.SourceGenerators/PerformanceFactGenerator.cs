@@ -63,7 +63,7 @@ public class PerformanceFactGenerator : IIncrementalGenerator
 
                 namespace {{ns}} {
                     
-                    [Collection("PerfUnit.SequentialTests")]
+                    //[Collection("PerfUnit.SequentialTests")]
                     public partial class {{className}} {
                         {{methodsBuilder}}
                     }
