@@ -8,8 +8,15 @@
     <PackageId>PerfUnit</PackageId>
     <Version>0.1.0</Version>
     <Authors>IridiumIO</Authors>
+    <Copyright>Copyright © 2025 IridiumIO</Copyright>
     <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
-    <Description>Add performance (runtime/memory usage) assertions to unit tests.</Description>
+    <Description>Add performance (runtime/memory usage) assertions to xUnit unit tests.</Description>
+    <RepositoryUrl>https://github.com/IridiumIO/PerfUnit</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/IridiumIO/PerfUnit</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/IridiumIO/PerfUnit</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>performance;benchmark;unit-testing;xunit;source-generator;test</PackageTags>
+    <PackageReleaseNotes>Initial Release</PackageReleaseNotes>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
